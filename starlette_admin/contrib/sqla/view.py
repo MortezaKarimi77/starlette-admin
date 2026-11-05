@@ -322,19 +322,18 @@ class ModelView(BaseModelView):
            ```
         """
         clauses = []
-        searchable_types = (
-            StringField,
-            SlugField,
-            TextAreaField,
-            EmailField,
-            URLField,
-            PhoneField,
-            ColorField,
-            EnumField,
-            IPAddressField,
-        )
         for field in self.get_fields_list(request):
-            if field.searchable and type(field) in searchable_types:
+            if field.searchable and type(field) in [
+                StringField,
+                SlugField,
+                TextAreaField,
+                EmailField,
+                URLField,
+                PhoneField,
+                ColorField,
+                EnumField,
+                IPAddressField,
+            ]:
                 attr = getattr(self.model, field.name)
                 clauses.append(cast(attr, String).ilike(f"%{term}%"))
         return or_(*clauses) if clauses else false()
