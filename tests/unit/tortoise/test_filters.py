@@ -1,5 +1,6 @@
 """Unit tests for starlette_admin.contrib.tortoise.filters."""
 
+import uuid
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -15,9 +16,11 @@ from starlette_admin.contrib.tortoise.filters import (
     RelationNoneOfFilter,
     RelationNotInFilter,
     TortoiseFilterRegistry,
+    UUIDEqualFilter,
+    UUIDNotEqualFilter,
 )
 from starlette_admin.contrib.tortoise.view import ModelView as TortoiseModelView
-from starlette_admin.fields import BaseField, HasMany, HasOne
+from starlette_admin.fields import BaseField, HasMany, HasOne, UUIDField
 from starlette_admin.filters import FilterApplyContext, FilterValidationError
 from tortoise import fields as t_fields
 from tortoise.models import Model as TortoiseModel
@@ -100,3 +103,32 @@ def test_tortoise_relation_filters_and_registry():
     item_view._validate_relation_pks(["1", "2"])
     with pytest.raises(FilterValidationError, match="Invalid primary key"):
         item_view._validate_relation_pks(["not-an-int"])
+
+
+def test_registry_uuid_field():
+    registry = TortoiseFilterRegistry()
+    filters = registry.filters_for(UUIDField("token"))
+    by_name = {f.name: f for f in filters}
+    assert set(by_name) == {
+        "contains",
+        "not_contains",
+        "startswith",
+        "endswith",
+        "eq",
+        "neq",
+        "is_null",
+        "is_not_null",
+    }
+    assert by_name["eq"] is UUIDEqualFilter
+    assert by_name["neq"] is UUIDNotEqualFilter
+
+
+def test_uuid_filter_parse_and_apply():
+    expected = uuid.UUID("01a1771e-8578-70b4-b57b-8f331bba0c4c")
+    assert UUIDEqualFilter().parse_value(str(expected)) == expected
+    with pytest.raises(FilterValidationError):
+        UUIDEqualFilter().parse_value("not-a-uuid")
+    eq_q = UUIDEqualFilter().apply(FilterApplyContext(None, "token", expected))
+    neq_q = UUIDNotEqualFilter().apply(FilterApplyContext(None, "token", expected))
+    assert eq_q.filters == {"token": expected}
+    assert neq_q._is_negated is True

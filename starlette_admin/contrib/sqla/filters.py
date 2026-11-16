@@ -29,6 +29,7 @@ from starlette_admin.fields import (
     StringField,
     TextAreaField,
     TimeField,
+    UUIDField,
 )
 from starlette_admin.filters import (
     FilterApplyContext,
@@ -93,6 +94,8 @@ from starlette_admin.filters.string import (
     NotContainsFilter as BaseNotContainsFilter,
 )
 from starlette_admin.filters.string import StartsWithFilter as BaseStartsWithFilter
+from starlette_admin.filters.uuid import UUIDEqualFilter as BaseUUIDEqualFilter
+from starlette_admin.filters.uuid import UUIDNotEqualFilter as BaseUUIDNotEqualFilter
 from starlette_admin.tools import iterdecode
 
 
@@ -245,6 +248,29 @@ class StartsWithFilter(BaseStartsWithFilter):
 class EndsWithFilter(BaseEndsWithFilter):
     def apply(self, ctx: FilterApplyContext) -> Any:
         return cast(_column(ctx), String).ilike(f"%{ctx.value}")
+
+
+# UUID
+
+
+def _coerce_uuid_value(column: InstrumentedAttribute, value: Any) -> Any:
+    """Match the column's SQLAlchemy `python_type`: `Uuid(as_uuid=True)` expects
+    a `uuid.UUID`, while `Uuid(as_uuid=False)` / `String(36)` expect `str`."""
+    if extract_column_python_type(column) is str:
+        return str(value)
+    return value
+
+
+class UUIDEqualFilter(BaseUUIDEqualFilter):
+    def apply(self, ctx: FilterApplyContext) -> Any:
+        column = _column(ctx)
+        return column == _coerce_uuid_value(column, ctx.value)
+
+
+class UUIDNotEqualFilter(BaseUUIDNotEqualFilter):
+    def apply(self, ctx: FilterApplyContext) -> Any:
+        column = _column(ctx)
+        return column != _coerce_uuid_value(column, ctx.value)
 
 
 # Numeric
@@ -467,6 +493,23 @@ class SqlaFilterRegistry(FilterRegistry):
             EndsWithFilter,
             EqualFilter,
             NotEqualFilter,
+            IsNullFilter,
+            IsNotNullFilter,
+        ]
+
+    @filters(UUIDField)
+    def uuid_filters(self, field: BaseField) -> list[type[BaseFilter]]:
+        """`UUIDField` validates equality inputs up front so invalid strings
+        return 400 rather than causing strict DB drivers (like asyncpg) to
+        fail with 500, while keeping substring string filters via `cast`.
+        """
+        return [
+            ContainsFilter,
+            NotContainsFilter,
+            StartsWithFilter,
+            EndsWithFilter,
+            UUIDEqualFilter,
+            UUIDNotEqualFilter,
             IsNullFilter,
             IsNotNullFilter,
         ]

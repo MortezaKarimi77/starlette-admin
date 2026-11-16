@@ -10,6 +10,7 @@ filters and how to filter on a relation field using SQLAlchemy's has()/any().
 
 import datetime
 import enum
+import uuid
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -25,13 +26,17 @@ from sqlalchemy import (
     String,
     Text,
     Time,
+    Uuid,
     create_engine,
     select,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
+from sqlalchemy.pool import StaticPool
+from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette_admin.contrib.sqla import ModelView
+from starlette.testclient import TestClient
+from starlette_admin.contrib.sqla import Admin, ModelView
 from starlette_admin.contrib.sqla.filters import (
     BetweenFilter,
     ContainsFilter,
@@ -60,6 +65,8 @@ from starlette_admin.contrib.sqla.filters import (
     StartsWithFilter,
     TimeBetweenFilter,
     TimeEqualFilter,
+    UUIDEqualFilter,
+    UUIDNotEqualFilter,
     _build_rule_clause,
     build_filter_clause,
 )
@@ -100,6 +107,10 @@ class Item(Base):
     count: Mapped[int] = mapped_column(Integer)
     price: Mapped[float] = mapped_column(Float)
     is_available: Mapped[bool] = mapped_column(Boolean)
+    uid: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), default=uuid.uuid4)
+    uid_str: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), default=lambda: str(uuid.uuid4())
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime)
     available_on: Mapped[datetime.date] = mapped_column(Date)
     available_from: Mapped[datetime.time] = mapped_column(Time)
@@ -115,7 +126,11 @@ class Item(Base):
 
 @pytest.fixture(scope="module")
 def engine():
-    eng = create_engine("sqlite:///:memory:")
+    eng = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(eng)
     return eng
 
@@ -134,6 +149,8 @@ def seeded_session(engine):
                 count=10,
                 price=9.99,
                 is_available=True,
+                uid=uuid.UUID("11111111-1111-4111-8111-111111111111"),
+                uid_str="11111111-1111-4111-8111-111111111111",
                 created_at=datetime.datetime(2024, 3, 1, 12, 0),
                 available_on=datetime.date(2024, 3, 1),
                 available_from=datetime.time(8, 0),
@@ -148,6 +165,8 @@ def seeded_session(engine):
                 count=20,
                 price=19.99,
                 is_available=False,
+                uid=uuid.UUID("22222222-2222-4222-8222-222222222222"),
+                uid_str="22222222-2222-4222-8222-222222222222",
                 created_at=datetime.datetime(2024, 6, 1, 18, 0),
                 available_on=datetime.date(2024, 6, 1),
                 available_from=datetime.time(18, 0),
@@ -918,3 +937,90 @@ def test_auto_detected_fk_column_respects_access_and_filterable_restrictions():
         ).status_code
         == 400
     )
+
+
+# ── UUID filters ──────────────────────────────────────────────────────────────
+
+
+def test_uuid_equal_and_not_equal_as_uuid(seeded_session):
+    alpha_uuid = uuid.UUID("11111111-1111-4111-8111-111111111111")
+    rows = (
+        seeded_session.execute(
+            select(Item).where(UUIDEqualFilter().apply(_ctx("uid", alpha_uuid)))
+        )
+        .scalars()
+        .all()
+    )
+    assert [r.name for r in rows] == ["Alpha"]
+
+    rows = (
+        seeded_session.execute(
+            select(Item).where(UUIDNotEqualFilter().apply(_ctx("uid", alpha_uuid)))
+        )
+        .scalars()
+        .all()
+    )
+    assert [r.name for r in rows] == ["Beta"]
+
+
+def test_uuid_equal_and_not_equal_as_str(seeded_session):
+    alpha_uuid = uuid.UUID("11111111-1111-4111-8111-111111111111")
+    rows = (
+        seeded_session.execute(
+            select(Item).where(UUIDEqualFilter().apply(_ctx("uid_str", alpha_uuid)))
+        )
+        .scalars()
+        .all()
+    )
+    assert [r.name for r in rows] == ["Alpha"]
+
+    rows = (
+        seeded_session.execute(
+            select(Item).where(UUIDNotEqualFilter().apply(_ctx("uid_str", alpha_uuid)))
+        )
+        .scalars()
+        .all()
+    )
+    assert [r.name for r in rows] == ["Beta"]
+
+
+def test_uuid_filter_http_validation_and_queries(engine, seeded_session):
+    admin = Admin(engine)
+    admin.add_view(ModelView(Item))
+    admin.add_view(ModelView(Category))
+    app = Starlette()
+    admin.mount_to(app)
+    client = TestClient(app)
+
+    res = client.get(
+        "/admin/item/list",
+        params={"filter": "uid__eq=11111111-1111-4111-8111-111111111111"},
+    )
+    assert res.status_code == 200
+    assert "Alpha" in res.text
+    assert "Beta" not in res.text
+
+    res = client.get(
+        "/admin/item/list",
+        params={"filter": "uid__neq=11111111-1111-4111-8111-111111111111"},
+    )
+    assert res.status_code == 200
+    assert "Beta" in res.text
+    assert "Alpha" not in res.text
+
+    res = client.get(
+        "/admin/item/list",
+        params={"filter": "uid_str__eq=11111111-1111-4111-8111-111111111111"},
+    )
+    assert res.status_code == 200
+    assert "Alpha" in res.text
+    assert "Beta" not in res.text
+
+    res = client.get("/admin/item/list", params={"filter": "uid__contains=11111111"})
+    assert res.status_code == 200
+    assert "Alpha" in res.text
+
+    for op in ("eq", "neq"):
+        bad = client.get("/admin/item/list", params={"filter": f"uid__{op}=not-a-uuid"})
+        assert bad.status_code == 400
+        assert "not a valid UUID" in bad.text
