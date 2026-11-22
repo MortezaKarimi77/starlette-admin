@@ -1,8 +1,10 @@
 """Unit tests for starlette_admin.contrib.tortoise.filters."""
 
+import datetime
 import uuid
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from zoneinfo import ZoneInfo
 
 import pytest
 from starlette_admin.contrib.tortoise import filters as tortoise_filters
@@ -11,6 +13,8 @@ from starlette_admin.contrib.tortoise.filters import (
     BackwardRelationInFilter,
     BackwardRelationNotInFilter,
     ContainsFilter,
+    DateTimeBetweenFilter,
+    DateTimeEqualFilter,
     RelationAnyOfFilter,
     RelationInFilter,
     RelationNoneOfFilter,
@@ -42,6 +46,22 @@ def test_register_filters_plugin_api():
         assert registry.filters_for(_PluginField("x")) == [_PluginFilter]
     finally:
         del tortoise_filters._EXTERNAL_FILTERS[_PluginField]
+
+    ctx = FilterApplyContext(
+        query=None,
+        field_name="created_at",
+        value=datetime.datetime(2024, 3, 1, 12, 0),
+        value2=datetime.datetime(2024, 3, 2, 12, 0),
+    )
+    expected_dt1 = datetime.datetime(2024, 3, 1, 12, 0, tzinfo=ZoneInfo("UTC"))
+    expected_dt2 = datetime.datetime(2024, 3, 2, 12, 0, tzinfo=ZoneInfo("UTC"))
+    eq_q = DateTimeEqualFilter().apply(ctx)
+    assert eq_q.filters == {"created_at": expected_dt1}
+    between_q = DateTimeBetweenFilter().apply(ctx)
+    assert between_q.filters == {
+        "created_at__gte": expected_dt1,
+        "created_at__lte": expected_dt2,
+    }
 
 
 def test_tortoise_relation_filters_and_registry():

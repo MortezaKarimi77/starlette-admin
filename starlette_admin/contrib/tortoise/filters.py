@@ -77,7 +77,9 @@ from starlette_admin.filters.string import NotContainsFilter as BaseNotContainsF
 from starlette_admin.filters.string import StartsWithFilter as BaseStartsWithFilter
 from starlette_admin.filters.uuid import UUIDEqualFilter as BaseUUIDEqualFilter
 from starlette_admin.filters.uuid import UUIDNotEqualFilter as BaseUUIDNotEqualFilter
+from starlette_admin.i18n import get_database_tzinfo
 from tortoise.expressions import Q, Subquery
+from tortoise.timezone import get_use_tz
 
 from .fields import BackwardHasOne
 from .helpers import relation_source_field
@@ -314,6 +316,13 @@ class BetweenFilter(BaseBetweenFilter):
 # Date / datetime
 
 
+def _coerce_datetime_tz(value: Any) -> Any:
+    """Attach the database `tzinfo` to a naive `datetime` when Tortoise timezone support is active."""
+    if isinstance(value, datetime.datetime) and value.tzinfo is None and get_use_tz():
+        return value.replace(tzinfo=get_database_tzinfo())
+    return value
+
+
 class DateEqualFilter(BaseDateEqualFilter):
     def apply(self, ctx: FilterApplyContext) -> Q:
         return Q(**{ctx.field_name: ctx.value})
@@ -321,7 +330,7 @@ class DateEqualFilter(BaseDateEqualFilter):
 
 class DateTimeEqualFilter(BaseDateTimeEqualFilter):
     def apply(self, ctx: FilterApplyContext) -> Q:
-        return Q(**{ctx.field_name: ctx.value})
+        return Q(**{ctx.field_name: _coerce_datetime_tz(ctx.value)})
 
 
 class DateBetweenFilter(BaseDateBetweenFilter):
@@ -338,8 +347,8 @@ class DateTimeBetweenFilter(BaseDateTimeBetweenFilter):
     def apply(self, ctx: FilterApplyContext) -> Q:
         return Q(
             **{
-                f"{ctx.field_name}__gte": ctx.value,
-                f"{ctx.field_name}__lte": ctx.value2,
+                f"{ctx.field_name}__gte": _coerce_datetime_tz(ctx.value),
+                f"{ctx.field_name}__lte": _coerce_datetime_tz(ctx.value2),
             }
         )
 
