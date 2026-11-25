@@ -634,16 +634,20 @@ function initFilterBuilder(config) {
       $valueTags.toggleClass("d-none", !showTags);
       $valueRelation.toggleClass("d-none", !isRelation);
       if (isRelation) {
-        // Defer init so Select2 runs after the row is appended to the live DOM.
-        setTimeout(function () {
-          if (
-            !$valueRelation.hasClass("d-none") &&
-            document.body &&
-            document.body.contains($valueRelation[0])
-          ) {
-            maybeInitRelationInput($valueRelation, fieldByName($field.val()));
-          }
-        }, 0);
+        if (document.body && document.body.contains($valueRelation[0])) {
+          maybeInitRelationInput($valueRelation, fieldByName($field.val()));
+        } else {
+          // Defer init so Select2 runs after the row is appended to the live DOM.
+          setTimeout(function () {
+            if (
+              !$valueRelation.hasClass("d-none") &&
+              document.body &&
+              document.body.contains($valueRelation[0])
+            ) {
+              maybeInitRelationInput($valueRelation, fieldByName($field.val()));
+            }
+          }, 0);
+        }
       } else if ($valueRelation.data("s2")) {
         destroyRelationInput($valueRelation);
       }
@@ -653,7 +657,11 @@ function initFilterBuilder(config) {
         } else {
           // Defer init so Select2 runs after the row is appended to the live DOM.
           setTimeout(function () {
-            if (!$valueTags.hasClass("d-none") && document.body && document.body.contains($valueTags[0])) {
+            if (
+              !$valueTags.hasClass("d-none") &&
+              document.body &&
+              document.body.contains($valueTags[0])
+            ) {
               maybeInitTagsInput($valueTags);
             }
           }, 0);
