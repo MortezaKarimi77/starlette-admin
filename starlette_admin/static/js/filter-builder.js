@@ -40,23 +40,15 @@ function initFilterBuilder(config) {
   let $dropdownMenu = $form.closest(".dropdown-menu");
   let s2Interacting = false;
 
-  // Select2 dropdowns (for relation and tags filters) attach to document.body
-  // so they are never clipped by `.dropdown-menu`'s `overflow-y: auto`.
-  // Selecting an option or removing a tag can mutate/detach the target node
-  // before Bootstrap's `autoClose="outside"` click handler runs, so track
-  // mousedown inside Select2 and keep the filter dropdown open.
-  $(document)
-    .off(".saFilterS2")
-    .on("mousedown.saFilterS2", ".select2-container, .select2-dropdown", function () {
-      if (!$dropdownMenu.hasClass("show")) return;
-      s2Interacting = true;
-    })
-    .on("mouseup.saFilterS2 blur.saFilterS2", function () {
-      if (!s2Interacting) return;
-      setTimeout(function () {
-        s2Interacting = false;
-      }, 0);
-    });
+  // Select2 dropdowns (for relation, enum, and tags filters) attach to
+  // document.body so they are never clipped by `.dropdown-menu`'s
+  // `overflow-y: auto`. Selecting an option or removing a chip can
+  // mutate/detach the target node before Bootstrap's `autoClose="outside"`
+  // click handler runs, so track mousedown inside Select2 and keep the
+  // filter dropdown open.
+  function hasOpenSelect2() {
+    return $rows.find(".select2-container--open").length > 0;
+  }
 
   function closeOpenSelect2() {
     $rows.find("select.select2-hidden-accessible").each(function () {
@@ -64,11 +56,66 @@ function initFilterBuilder(config) {
     });
   }
 
+  function clearS2Interacting() {
+    if (!s2Interacting) return;
+    setTimeout(function () {
+      s2Interacting = false;
+    }, 0);
+  }
+
+  $(document)
+    .off(".saFilterS2")
+    .on(
+      "mousedown.saFilterS2",
+      "#filter-builder-dropdown .select2-container, .sa-filter-s2-dropdown",
+      function (e) {
+        if ((e.button && e.button !== 0) || !$dropdownMenu.hasClass("show")) return;
+        s2Interacting = true;
+      }
+    )
+    .on("mouseup.saFilterS2", clearS2Interacting);
+  $(window).off(".saFilterS2").on("blur.saFilterS2", clearS2Interacting);
+
+  // Intercept Escape on `window` in the capture phase (before Bootstrap 5's
+  // `document` capture listener) so:
+  // 1. Pressing Escape while a Select2 dropdown is open closes ONLY Select2
+  //    (leaving the filter builder menu open, e.g. to click "Apply filters"),
+  //    even when focus has moved to document.body after clicking an option.
+  // 2. The matching Escape keyup never reaches Select2 4.1.0's inline-search
+  //    `keyup.search` listener (which omits ESC from its ignore list and would
+  //    otherwise immediately re-open the dropdown).
+  if (window._saFilterS2Keydown) {
+    window.removeEventListener("keydown", window._saFilterS2Keydown, true);
+  }
+  if (window._saFilterS2Keyup) {
+    window.removeEventListener("keyup", window._saFilterS2Keyup, true);
+  }
+  window._saFilterS2Keydown = function (e) {
+    if (e.key === "Escape" && $dropdownMenu.hasClass("show") && hasOpenSelect2()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      closeOpenSelect2();
+    }
+  };
+  window._saFilterS2Keyup = function (e) {
+    if (
+      e.key === "Escape" &&
+      $dropdownMenu.hasClass("show") &&
+      $(e.target).closest(".select2-search--inline").length
+    ) {
+      e.stopPropagation();
+    }
+  };
+  window.addEventListener("keydown", window._saFilterS2Keydown, true);
+  window.addEventListener("keyup", window._saFilterS2Keyup, true);
+
   $dropdown.on("hide.bs.dropdown", function (e) {
     if (
       s2Interacting ||
       (e.clickEvent &&
-        $(e.clickEvent.target).closest(".select2-container, .select2-dropdown").length)
+        $(e.clickEvent.target).closest(
+          "#filter-builder-dropdown .select2-container, .sa-filter-s2-dropdown"
+        ).length)
     ) {
       e.preventDefault();
       return;
@@ -351,15 +398,58 @@ function initFilterBuilder(config) {
     }
   }
 
-  // ── Select2 tags initialisation ───────────────────────────────────────────
+  // ── Select2 helpers ───────────────────────────────────────────────────────
+
+  function destroySelect2($el) {
+    if ($el.data("s2")) {
+      $el.select2("destroy").removeData("s2");
+    }
+  }
+
+  function destroySelect2In($container) {
+    $container.find("select.select2-hidden-accessible").each(function () {
+      destroySelect2($(this));
+    });
+  }
 
   function maybeInitTagsInput($el) {
-    if ($el.data("s2")) return;
+    if ($el.data("s2") || !$.fn.select2) return;
     let prefill = $el.data("filterPrefill") || [];
+    $el.removeData("filterPrefill");
     prefill.forEach(function (v) {
       $el.append(new Option(v, v, true, true));
     });
-    $el.data("s2", true).select2({ tags: true, tokenSeparators: [","], width: "100%" });
+    $el.data("s2", true).select2({
+      tags: true,
+      tokenSeparators: [","],
+      width: "100%",
+      dropdownParent: $(document.body),
+      dropdownCssClass: "sa-filter-s2-dropdown",
+    });
+  }
+
+  function maybeInitEnumSelect($el) {
+    if ($el.data("s2") || !$.fn.select2) return;
+    $el.data("s2", true).select2({
+      width: "100%",
+      dropdownParent: $(document.body),
+      closeOnSelect: false,
+      dropdownCssClass: "sa-filter-s2-dropdown sa-filter-enum-dropdown",
+    });
+  }
+
+  function initSelect2In($container) {
+    $container.find('[data-sa-hook="filter-row-value-tags"]:not(.d-none)').each(function () {
+      maybeInitTagsInput($(this));
+    });
+    $container
+      .find('[data-sa-hook="filter-row-value-select"]:not(.d-none)')
+      .filter(function () {
+        return this.multiple;
+      })
+      .each(function () {
+        maybeInitEnumSelect($(this));
+      });
   }
 
   // ── Select2 relation record picker ────────────────────────────────────────
@@ -379,12 +469,13 @@ function initFilterBuilder(config) {
    * raw first and then swapped for their rendered labels once resolved.
    */
   function maybeInitRelationInput($el, field) {
-    if ($el.data("s2") || !field || !field.relation) return;
+    if ($el.data("s2") || !$.fn.select2 || !field || !field.relation) return;
     let rel = field.relation;
     let initToken = ($el.data("s2Token") || 0) + 1;
     $el.data("s2", true).data("s2Token", initToken).select2({
       width: "100%",
       dropdownParent: $(document.body),
+      dropdownCssClass: "sa-filter-s2-dropdown",
       ajax: {
         url: rel.url,
         dataType: "json",
@@ -436,14 +527,8 @@ function initFilterBuilder(config) {
   }
 
   function destroyRelationInput($el) {
-    if ($el.data("s2")) $el.select2("destroy").removeData("s2");
+    destroySelect2($el);
     $el.empty();
-  }
-
-  function destroySelect2In($container) {
-    $container.find("select.select2-hidden-accessible").each(function () {
-      if ($(this).data("s2")) $(this).select2("destroy").removeData("s2");
-    });
   }
 
   // ── DOM creation ──────────────────────────────────────────────────────────
@@ -480,12 +565,41 @@ function initFilterBuilder(config) {
       let isArray = dataType === "array";
       let isRelation = dataType === "relation" && !!(field && field.relation);
       let showSelect = hasChoices && !isNone && !isArray && !isRelation;
+      let showMultiEnum = showSelect && dataType === "enum";
       let showTags = isArray && !isNone;
+      let wasMultiEnum = $valueSelect.prop("multiple");
+      let prevEnumVals = wasMultiEnum && showMultiEnum ? $valueSelect.val() || [] : [];
+
+      if (!showMultiEnum) {
+        // Tear down Select2 before flipping `multiple` or hiding the <select>;
+        // otherwise its generated container stays visible as a sibling and
+        // Select2 wouldn't switch cleanly back to single-select mode.
+        destroySelect2($valueSelect);
+      }
+
+      // Set `multiple` before populating options: in non-multiple mode the
+      // browser auto-selects option 0, which would otherwise leak as an
+      // unwanted selection once `multiple` is enabled.
+      $valueSelect.prop("multiple", showMultiEnum);
+
       // Different filters on the same field can carry different `choices`
       // (e.g. `department_contains` has none while `department_in` lists
       // every department), so the select must be repopulated on every op
       // change, not just when the field itself changes.
       populateSelect(choices);
+
+      if (showMultiEnum && prevEnumVals.length) {
+        let validValues = new Set(
+          (choices || []).map(function (choice) {
+            return String(choice[0]);
+          })
+        );
+        let kept = prevEnumVals.filter(function (v) {
+          return validValues.has(String(v));
+        });
+        $valueSelect.val(kept);
+      }
+
       // `.toggleClass`, not `.toggle()`/`.show()`/`.hide()`: jQuery's
       // show/hide path dereferences `ownerDocument.documentElement`, which is
       // `null` for elements still inside cloned `<template>` content (its
@@ -495,9 +609,28 @@ function initFilterBuilder(config) {
         .attr("type", inputType)
         .attr("step", inputType === "number" ? "any" : null)
         .toggleClass("d-none", showSelect || isNone || showTags || isRelation);
-      $valueSelect
-        .prop("multiple", dataType === "enum")
-        .toggleClass("d-none", !showSelect);
+      $valueSelect.toggleClass("d-none", !showSelect);
+      if (showMultiEnum) {
+        if ($valueSelect.data("s2")) {
+          // Options were refreshed while Select2 was already active (e.g.
+          // switching `in` -> `not_in` or `any_of` -> `all_of`); sync chips.
+          $valueSelect.trigger("change");
+        } else if (document.body && document.body.contains($valueSelect[0])) {
+          maybeInitEnumSelect($valueSelect);
+        } else {
+          // Defer init so Select2 runs after the row is appended to the live DOM.
+          setTimeout(function () {
+            if (
+              !$valueSelect.hasClass("d-none") &&
+              $valueSelect.prop("multiple") &&
+              document.body &&
+              document.body.contains($valueSelect[0])
+            ) {
+              maybeInitEnumSelect($valueSelect);
+            }
+          }, 0);
+        }
+      }
       $valueTags.toggleClass("d-none", !showTags);
       $valueRelation.toggleClass("d-none", !isRelation);
       if (isRelation) {
@@ -515,17 +648,18 @@ function initFilterBuilder(config) {
         destroyRelationInput($valueRelation);
       }
       if (showTags) {
-        // Defer init so Select2 runs after the row is appended to the live DOM.
-        setTimeout(function () {
-          if (!$valueTags.hasClass("d-none") && document.body && document.body.contains($valueTags[0])) {
-            maybeInitTagsInput($valueTags);
-          }
-        }, 0);
-      } else if ($valueTags.data("s2")) {
-        // Tear down Select2 when the tags input is hidden; otherwise its
-        // generated container stays in the DOM as a sibling of the hidden
-        // <select> and keeps showing after the user switches field/op.
-        $valueTags.select2("destroy").removeData("s2");
+        if (document.body && document.body.contains($valueTags[0])) {
+          maybeInitTagsInput($valueTags);
+        } else {
+          // Defer init so Select2 runs after the row is appended to the live DOM.
+          setTimeout(function () {
+            if (!$valueTags.hasClass("d-none") && document.body && document.body.contains($valueTags[0])) {
+              maybeInitTagsInput($valueTags);
+            }
+          }, 0);
+        }
+      } else {
+        destroySelect2($valueTags);
       }
       $value2
         .attr("type", inputType)
@@ -548,9 +682,12 @@ function initFilterBuilder(config) {
       // record picker must be rebuilt (not reused) for the new field.
       $valueRelation.removeData("filterPrefill");
       destroyRelationInput($valueRelation);
+      // Tear down and reset the choice select before `syncOps` rebuilds the
+      // new field's options so previous selections never leak across fields.
+      destroySelect2($valueSelect);
+      $valueSelect.val([]);
       syncOps(null);
       $value.val("");
-      $valueSelect.val([]);
       // Clear the tags select so its state doesn't leak when the user
       // switches to another field. Use Select2's API when active.
       if ($valueTags.data("s2")) {
@@ -560,7 +697,10 @@ function initFilterBuilder(config) {
       }
       $value2.val("");
     });
-    $op.on("change", syncValueInputs);
+    $op.on("change", function () {
+      closeOpenSelect2();
+      syncValueInputs();
+    });
     $row.find('[data-sa-action="filter-row-remove"]').on("click", function () {
       destroySelect2In($row);
       $row.remove();
@@ -580,7 +720,15 @@ function initFilterBuilder(config) {
         let vals = initial.value == null ? [] : (Array.isArray(initial.value) ? initial.value : [initial.value]);
         $valueTags.data("filterPrefill", vals);
       } else if (hasChoices) {
-        $valueSelect.val(initial.value == null ? [] : initial.value);
+        let val =
+          initial.value == null
+            ? dataType === "enum"
+              ? []
+              : ""
+            : dataType === "enum" && !Array.isArray(initial.value)
+              ? [initial.value]
+              : initial.value;
+        $valueSelect.val(val);
       } else {
         $value.val(initial.value == null ? "" : initial.value);
       }
@@ -605,7 +753,9 @@ function initFilterBuilder(config) {
     $logic.val(initial && initial.logic === "or" ? "or" : "and");
 
     $group.find('[data-sa-action="filter-group-add-row"]').on("click", function () {
-      $children.append(createRow(null));
+      let $row = createRow(null);
+      $children.append($row);
+      initSelect2In($row);
     });
     $group.find('[data-sa-action="filter-group-add-group"]').on("click", function () {
       $children.append(createGroup(null));
@@ -655,7 +805,9 @@ function initFilterBuilder(config) {
   }
 
   $('[data-sa-action="add-filter-row"]').on("click", function () {
-    $rows.append(createRow(null));
+    let $row = createRow(null);
+    $rows.append($row);
+    initSelect2In($row);
   });
   $('[data-sa-action="add-filter-group"]').on("click", function () {
     $rows.append(createGroup(null));
@@ -663,12 +815,9 @@ function initFilterBuilder(config) {
 
   if (!prefill()) $rows.append(createRow(null));
 
-  // Init Select2 tags on any array-type rows that were built from the prefill
-  // tree (their containers were not live during createRow, so syncValueInputs
-  // couldn't init them inline).
-  $rows.find('[data-sa-hook="filter-row-value-tags"]:not(.d-none)').each(function () {
-    maybeInitTagsInput($(this));
-  });
+  // Init Select2 on any enum/array rows that were built while detached from
+  // the live DOM (their containers were not live during createRow).
+  initSelect2In($rows);
 
   $form.on("submit", function () {
     let parts = serializeChildren($rows);

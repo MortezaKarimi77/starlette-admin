@@ -115,6 +115,43 @@
                 width: 100%;
                 max-width: 100%;
             }
+
+            .sa-filter-enum-dropdown .select2-results__option--selected {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                font-weight: 500;
+            }
+
+            .sa-filter-enum-dropdown .select2-results__option--selected::after {
+                content: "\2713";
+                content: "\2713" / "";
+                color: var(--tblr-primary);
+                font-weight: 600;
+                flex-shrink: 0;
+                margin-inline-start: .5rem;
+            }
+
+            @media (max-width: 575.98px) {
+                #filter-builder-dropdown .filter-row {
+                    flex-wrap: wrap;
+                }
+
+                #filter-builder-dropdown .filter-row-field,
+                #filter-builder-dropdown .filter-row-op {
+                    min-width: 0;
+                    max-width: none;
+                    flex: 1 1 40%;
+                }
+
+                #filter-builder-dropdown .filter-row-value,
+                #filter-builder-dropdown .filter-row-value-select,
+                #filter-builder-dropdown .filter-row-value2,
+                #filter-builder-dropdown .filter-row>.select2-container {
+                    flex: 1 1 0%;
+                    min-width: 10rem;
+                }
+            }
         </style>
         <template id="filter-row-template" data-sa-hook="filter-row-template">
             <div class="filter-row d-flex align-items-center gap-2 mb-2"

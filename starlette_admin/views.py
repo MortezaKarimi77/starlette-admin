@@ -2533,11 +2533,12 @@ class BaseModelView(BaseView, Generic[FieldReferenceT]):
 
     def _has_array_filter(self, request: Request) -> bool:
         """Whether any filter offered on the list page renders a Select2
-        input (tag input for ARRAY, record picker for RELATION), so the
-        Select2 assets must be loaded."""
+        input (tag input for ARRAY, multi-select for ENUM, record picker for
+        RELATION), so the Select2 assets must be loaded."""
         registry = self.get_filter_registry()
         return any(
-            f.data_type in (FilterDataType.ARRAY, FilterDataType.RELATION)
+            f.data_type
+            in (FilterDataType.ARRAY, FilterDataType.ENUM, FilterDataType.RELATION)
             for field in self.get_filterable_fields(request)
             for f in registry.filters_for(field)
         )
