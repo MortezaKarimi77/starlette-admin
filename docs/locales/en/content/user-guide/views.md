@@ -140,7 +140,7 @@ class PostView(ModelView):
     exclude_fields_from_export = ["content"]
 ```
 
-The available exclusion attributes end in `_create`, `_edit`, `_list`, `_detail`, `_export`, and `_import`.
+The available exclusion attributes end in `_create`, `_edit`, `_list`, `_detail`, `_export`, `_import`, and `_filter`.
 
 !!! important
     To let users set the primary key when they create a record, which is off by default, set `show_pk_in_forms = True`.

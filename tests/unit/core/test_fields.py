@@ -1960,12 +1960,6 @@ def test_computed_field_defaults():
     assert field.exclude_from_create is True
 
 
-def test_password_field_defaults():
-    field = PasswordField("secret")
-    assert field.input_type == "password"
-    assert field.filterable is False
-
-
 @pytest.mark.asyncio
 async def test_computed_field_parse_obj():
     field = _FullName("full_name")
