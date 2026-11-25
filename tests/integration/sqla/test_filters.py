@@ -1052,3 +1052,73 @@ def test_uuid_filter_http_validation_and_queries(engine, seeded_session):
         bad = client.get("/admin/item/list", params={"filter": f"uid__{op}=not-a-uuid"})
         assert bad.status_code == 400
         assert "not a valid UUID" in bad.text
+
+
+def test_multi_enum_filters_on_json_column_sqlite():
+    """End-to-end SQLite execution for EnumField(multiple=True) on a JSON
+    column, including empty lists, JSON/SQL nulls, int values, and statement
+    cache rebinding across distinct queries.
+    """
+    from sqlalchemy import JSON, null
+    from starlette_admin.contrib.sqla.filters import (
+        EnumAllOfFilter,
+        EnumAnyOfFilter,
+        EnumNoneOfFilter,
+    )
+
+    class _JsonBase(DeclarativeBase):
+        pass
+
+    class _Role(_JsonBase):
+        __tablename__ = "sqla_json_roles"
+        id: Mapped[int] = mapped_column(Integer, primary_key=True)
+        name: Mapped[str] = mapped_column(String)
+        perms: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+        levels: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
+
+    class _View:
+        model = _Role
+
+    eng = create_engine("sqlite:///:memory:")
+    _JsonBase.metadata.create_all(eng)
+    try:
+        with Session(eng) as s:
+            s.add_all(
+                [
+                    _Role(name="super", perms=["*:*"], levels=[1, 2, 3]),
+                    _Role(name="editor", perms=["read", "write"], levels=[1, 2]),
+                    _Role(name="viewer", perms=["read"], levels=[1]),
+                    _Role(name="empty", perms=[], levels=[]),
+                    _Role(name="json_null", perms=None, levels=None),
+                    _Role(name="sql_null", perms=null(), levels=null()),
+                ]
+            )
+            s.commit()
+
+            def run(flt, field_name, vals):
+                ctx = FilterApplyContext(
+                    query=None,
+                    field_name=field_name,
+                    value=vals,
+                    view=_View(),  # type: ignore[arg-type]
+                )
+                return sorted(
+                    s.scalars(select(_Role.name).where(flt().apply(ctx))).all()
+                )
+
+            assert run(EnumAnyOfFilter, "perms", ["*:*", "write"]) == [
+                "editor",
+                "super",
+            ]
+            # Re-run same shape with a different value to verify cache rebinding.
+            assert run(EnumAnyOfFilter, "perms", ["read"]) == ["editor", "viewer"]
+            assert run(EnumAllOfFilter, "perms", ["read", "write"]) == ["editor"]
+            assert run(EnumNoneOfFilter, "perms", ["read"]) == [
+                "empty",
+                "json_null",
+                "sql_null",
+                "super",
+            ]
+            assert run(EnumAllOfFilter, "levels", [1, 2]) == ["editor", "super"]
+    finally:
+        eng.dispose()

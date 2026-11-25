@@ -24,6 +24,9 @@ from starlette_admin.contrib.beanie.filters import (
     DateTimeBetweenFilter,
     DateTimeEqualFilter,
     EndsWithFilter,
+    EnumAllOfFilter,
+    EnumAnyOfFilter,
+    EnumNoneOfFilter,
     EqualFilter,
     GreaterThanFilter,
     GreaterThanOrEqualFilter,
@@ -56,6 +59,7 @@ from starlette_admin.fields import (
     BaseField,
     BooleanField,
     DateField,
+    EnumField,
     HasMany,
     HasOne,
     StringField,
@@ -389,3 +393,24 @@ def test_relation_filters_match_link_ids():
     assert RelationAnyOfFilter().apply(ctx) == {"author.$id": {"$in": [oid, "x"]}}
     assert RelationNotInFilter().apply(ctx) == {"author.$id": {"$nin": [oid, "x"]}}
     assert RelationNoneOfFilter().apply(ctx) == {"author.$id": {"$nin": [oid, "x"]}}
+
+
+def test_multi_enum_filters_and_registry():
+    assert EnumAnyOfFilter().apply(_ctx(value=["a", "b"])) == {
+        "field": {"$in": ["a", "b"]}
+    }
+    assert EnumAllOfFilter().apply(_ctx(value=["a", "b"])) == {
+        "field": {"$all": ["a", "b"]}
+    }
+    assert EnumNoneOfFilter().apply(_ctx(value=["a", "b"])) == {
+        "field": {"$nin": ["a", "b"]}
+    }
+    assert {
+        f.name
+        for f in filter_registry.filters_for(
+            EnumField("roles", choices=["a", "b"], multiple=True)
+        )
+    } == {"any_of", "all_of", "none_of", "is_null", "is_not_null"}
+    assert {
+        f.name for f in filter_registry.filters_for(EnumField("role", choices=["a"]))
+    } == {"eq", "neq", "in", "not_in", "is_null", "is_not_null"}
